@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Panda AI 3D — исправлено</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Nunito:wght@700;900&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#050810; font-family:'Nunito',sans-serif; color:#fff; overflow:hidden; height:100vh; width:100vw; }
+#canvas3d { position:fixed; inset:0; z-index:1; }
+
+/* SCANLINES */
+body::after { content:''; position:fixed; inset:0; pointer-events:none; z-index:999;
+  background:repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,232,255,0.008) 3px, rgba(0,232,255,0.008) 4px); }
+
+/* ROOM PARALLAX */
+#roomBg { position:fixed; inset:0; z-index:0;
+  background:radial-gradient(ellipse at 50% 85%, rgba(0,232,255,0.07) 0%, transparent 55%),
+    linear-gradient(180deg, #050810 0%, #08101a 60%, #060e16 100%);
+  perspective:1200px; transform-style:preserve-3d; }
+
+/* Mirror floor */
+#roomBg::after { content:''; position:absolute; bottom:0; left:0; right:0; height:28%;
+  background:linear-gradient(to top, rgba(0,232,255,0.09) 0%, rgba(0,100,150,0.04) 40%, transparent 100%);
+  pointer-events:none; z-index:2; }
+
+/* Panda reflection */
+#floorReflect { position:fixed; bottom:0; left:50%; transform:translateX(-50%);
+  width:160px; height:90px; background:radial-gradient(ellipse, rgba(0,232,255,0.18) 0%, transparent 70%);
+  filter:blur(8px); z-index:2; pointer-events:none; animation:reflPulse 2s ease-in-out infinite; }
+
+/* CABINET (left) */
+#cabinet { position:fixed; left:0; top:10%; width:clamp(60px,12vw,110px); height:70vh; z-index:3; pointer-events:all; cursor:pointer; transition:filter 0.3s; }
+#cabinet:hover { filter:brightness(1.3); }
+.cab-body { position:absolute; inset:0; background:linear-gradient(160deg,#0d1525 0%,#080d18 100%);
+  border:1px solid rgba(0,232,255,0.22); border-left:none; border-radius:0 6px 6px 0;
+  box-shadow:0 0 20px rgba(0,232,255,0.18), inset 0 0 12px rgba(0,232,255,0.05); }
+.cab-shelf { position:absolute; left:6px; right:6px; height:2px; background:rgba(0,232,255,0.35); box-shadow:0 0 6px rgba(0,232,255,0.5); }
+.cab-item { position:absolute; font-size:clamp(12px,2vw,18px); animation:itemFloat 3s ease-in-out infinite; }
+.cab-neon-strip { position:absolute; top:0; bottom:0; right:0; width:3px; background:linear-gradient(180deg,transparent,#00e8ff,transparent); box-shadow:0 0 8px #00e8ff; animation:stripPulse 2s ease-in-out infinite; }
+.cab-label { position:absolute; bottom:8px; left:50%; transform:translateX(-50%); font-family:'Orbitron',monospace; font-size:7px; color:rgba(0,232,255,0.5); letter-spacing:2px; white-space:nowrap; }
+
+/* Skin panel */
+#skinPanel { position:fixed; left:clamp(65px,13vw,115px); top:15%; width:min(200px,48vw); padding:14px; border-radius:12px; z-index:60; display:none; animation:fadeInLeft 0.3s ease; }
+#skinPanel h3 { font-family:'Orbitron',monospace; font-size:10px; color:#00e8ff; letter-spacing:2px; margin-bottom:10px; }
+.skin-opts { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.skin-opt { padding:8px; border:1px solid rgba(0,232,255,0.2); border-radius:8px; cursor:pointer; font-size:12px; font-weight:700; text-align:center; background:rgba(0,232,255,0.04); transition:all 0.2s; }
+.skin-opt:hover { border-color:#00e8ff; background:rgba(0,232,255,0.1); }
+
+/* UI панель снизу */
+#ui { position:fixed; bottom:20px; left:0; right:0; display:flex; flex-direction:column; align-items:center; gap:10px; z-index:100; pointer-events:none; }
+#ui > * { pointer-events:auto; }
+#chatInput { display:flex; gap:10px; background:rgba(0,10,20,0.7); backdrop-filter:blur(5px); border:1px solid #00e8ff44; border-radius:40px; padding:8px 16px; width:90%; max-width:500px; }
+#chatInput input { flex:1; background:transparent; border:none; color:white; font-family:'Nunito',sans-serif; font-size:16px; outline:none; }
+#chatInput input::placeholder { color:#00e8ff88; }
+#chatInput button { background:transparent; border:1px solid #00e8ff; color:#00e8ff; border-radius:30px; padding:6px 20px; font-weight:bold; cursor:pointer; transition:0.2s; }
+#chatInput button:hover { background:#00e8ff; color:#000; }
+#emotions, #rooms { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+.emote-btn, .room-btn { background:rgba(0,232,255,0.1); border:1px solid #00e8ff66; border-radius:30px; padding:6px 14px; font-size:14px; color:white; cursor:pointer; transition:0.2s; }
+.emote-btn:hover, .room-btn:hover { background:#00e8ff33; border-color:#00e8ff; }
+#chatText { background:rgba(0,0,0,0.5); border-radius:30px; padding:10px 20px; max-width:500px; text-align:center; font-size:16px; border:1px solid #00e8ff66; backdrop-filter:blur(5px); }
+
+/* Анимации */
+@keyframes itemFloat { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-5px); } }
+@keyframes stripPulse { 0%,100% { opacity:0.8; } 50% { opacity:1; } }
+@keyframes fadeInLeft { from { opacity:0; transform:translateX(-20px); } to { opacity:1; transform:translateX(0); } }
+@keyframes reflPulse { 0%,100% { opacity:0.8; } 50% { opacity:1; } }
+</style>
+</head>
+<body>
+<canvas id="canvas3d"></canvas>
+<div id="roomBg"></div>
+<div id="floorReflect"></div>
+<div id="cabinet" onclick="toggleSkinPanel()">
+  <div class="cab-body"></div>
+  <div class="cab-shelf" style="top:25%;"></div>
+  <div class="cab-shelf" style="top:50%;"></div>
+  <div class="cab-shelf" style="top:75%;"></div>
+  <div class="cab-item" style="top:10%;left:50%;transform:translate(-50%,0);">👕</div>
+  <div class="cab-item" style="top:35%;left:50%;transform:translate(-50%,0);">🤖</div>
+  <div class="cab-item" style="top:60%;left:50%;transform:translate(-50%,0);">🥷</div>
+  <div class="cab-item" style="top:85%;left:50%;transform:translate(-50%,0);">🚀</div>
+  <div class="cab-neon-strip"></div>
+  <div class="cab-label">СКИНЫ</div>
+</div>
+<div id="skinPanel" style="background:linear-gradient(135deg,rgba(0,232,255,0.1),rgba(0,100,150,0.05));border:1px solid rgba(0,232,255,0.3);box-shadow:0 0 15px rgba(0,232,255,0.25);">
+  <h3>ВЫБЕРИ СКИН</h3>
+  <div class="skin-opts">
+    <div class="skin-opt" onclick="changeSkin('base')">БАЗОВЫЙ</div>
+    <div class="skin-opt" onclick="changeSkin('cyber')">КИБЕР</div>
+    <div class="skin-opt" onclick="changeSkin('ninja')">НИНДЗЯ</div>
+    <div class="skin-opt" onclick="changeSkin('astro')">АСТРО</div>
+  </div>
+</div>
+
+<!-- UI элементы -->
+<div id="ui">
+  <div id="chatText">🐼 Привет! Спроси меня что-нибудь</div>
+  <div id="chatInput">
+    <input type="text" id="messageInput" placeholder="Напиши сообщение..." value="Как дела?">
+    <button id="sendBtn">➤</button>
+  </div>
+  <div id="emotions">
+    <button class="emote-btn" onclick="setEmotion('happy')">😊 Счастье</button>
+    <button class="emote-btn" onclick="setEmotion('excited')">🤩 Восторг</button>
+    <button class="emote-btn" onclick="setEmotion('thinking')">🤔 Думает</button>
+    <button class="emote-btn" onclick="setEmotion('love')">😍 Любовь</button>
+    <button class="emote-btn" onclick="setEmotion('surprised')">😲 Удивление</button>
+    <button class="emote-btn" onclick="setEmotion('angry')">😠 Злость</button>
+  </div>
+  <div id="rooms">
+    <button class="room-btn" onclick="loadRoom('main')">🏠 Главная</button>
+    <button class="room-btn" onclick="loadRoom('bedroom')">🛏️ Спальня</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/DragControls.js"></script>
+<!-- Для TextGeometry нужен шрифт, загружаем через THREE.FontUtils -->
+<script src="https://unpkg.com/three@0.128.0/examples/js/libs/opentype/opentype.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/loaders/FontLoader.js"></script>
+
+<script>
+const SERVER = "https://panda-server-er0a.onrender.com"; // замените на ваш сервер, если нужно
+
+let scene, camera, renderer, pandaGroup, eyeL, eyeR, jaw;
+let emotion = 'happy';
+let orbitControls, dragControls;
+let currentRoom = 'main';
+let audioCtx = null; // будет инициализирован по клику (из-за autoplay политики)
+let chatHistory = [];
+
+// Для работы с памятью
+try {
+  const saved = localStorage.getItem('pandaHistory');
+  if (saved) chatHistory = JSON.parse(saved);
+} catch(e) { console.warn('localStorage error'); }
+
+// ---- Инициализация Three.js ----
+function init() {
+  scene = new THREE.Scene();
+  scene.background = null; // прозрачный фон (виден #roomBg)
+
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(2, 1, 5);
+  camera.lookAt(0, 0, 0);
+
+  renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('canvas3d'), alpha: true, antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true; // для будущих теней
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  window.addEventListener('resize', onWindowResize, false);
+
+  // Освещение (будет добавлено в каждую комнату отдельно)
+  // Создадим группу со светом, чтобы удобно переиспользовать
+  createLights();
+
+  // Панда
+  createPanda();
+
+  // Управление
+  orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
+  orbitControls.enableDamping = true;
+  orbitControls.dampingFactor = 0.05;
+  orbitControls.enableZoom = true;
+  orbitControls.enablePan = true;
+  orbitControls.maxPolarAngle = Math.PI / 2; // не уходить под пол
+
+  dragControls = new THREE.DragControls([pandaGroup], camera, renderer.domElement);
+  dragControls.addEventListener('dragstart', () => { orbitControls.enabled = false; });
+  dragControls.addEventListener('dragend', () => { orbitControls.enabled = true; });
+
+  // Загружаем начальную комнату
+  loadRoom('main');
+
+  animate();
+}
+
+function createLights() {
+  // Эти источники будут добавлены в комнаты, чтобы не теряться при очистке
+  window.lightsGroup = new THREE.Group();
+
+  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
+  hemiLight.position.set(0, 20, 0);
+  lightsGroup.add(hemiLight);
+
+  const dirLight = new THREE.DirectionalLight(0xfff5e6, 1);
+  dirLight.position.set(5, 10, 7);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.width = 1024;
+  dirLight.shadow.mapSize.height = 1024;
+  const d = 5;
+  dirLight.shadow.camera.left = -d;
+  dirLight.shadow.camera.right = d;
+  dirLight.shadow.camera.top = d;
+  dirLight.shadow.camera.bottom = -d;
+  dirLight.shadow.camera.near = 2;
+  dirLight.shadow.camera.far = 20;
+  lightsGroup.add(dirLight);
+
+  const backLight = new THREE.PointLight(0x4466ff, 0.5);
+  backLight.position.set(-3, 2, -3);
+  lightsGroup.add(backLight);
+}
+
+function createPanda() {
+  pandaGroup = new THREE.Group();
+
+  // Голова (чуть больше, чтобы милее)
+  const headGeo = new THREE.SphereGeometry(1.1, 32, 32);
+  const headMat = new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 10 });
+  const head = new THREE.Mesh(headGeo, headMat);
+  head.castShadow = true;
+  head.receiveShadow = true;
+  pandaGroup.add(head);
+
+  // Тело
+  const bodyGeo = new THREE.SphereGeometry(0.9, 32, 32);
+  const bodyMat = new THREE.MeshPhongMaterial({ color: 0xffffff });
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = -1.3;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  pandaGroup.add(body);
+
+  // Уши (чёрные конусы)
+  const earGeo = new THREE.ConeGeometry(0.4, 0.6, 32);
+  const earMat = new THREE.MeshPhongMaterial({ color: 0x222222 });
+  const earL = new THREE.Mesh(earGeo, earMat);
+  earL.position.set(-0.7, 1.1, 0.1);
+  earL.rotation.x = -0.3;
+  earL.rotation.z = -0.2;
+  earL.castShadow = true;
+  pandaGroup.add(earL);
+
+  const earR = earL.clone();
+  earR.position.set(0.7, 1.1, 0.1);
+  earR.rotation.x = -0.3;
+  earR.rotation.z = 0.2;
+  pandaGroup.add(earR);
+
+  // Глаза
+  const eyeGeo = new THREE.SphereGeometry(0.22, 24, 24);
+  const eyeMat = new THREE.MeshPhongMaterial({ color: 0x000000 });
+  eyeL = new THREE.Mesh(eyeGeo, eyeMat);
+  eyeL.position.set(-0.45, 0.3, 1.0);
+  eyeL.castShadow = true;
+  pandaGroup.add(eyeL);
+
+  eyeR = eyeL.clone();
+  eyeR.position.set(0.45, 0.3, 1.0);
+  pandaGroup.add(eyeR);
+
+  // Блики в глазах (маленькие белые сферы)
+  const glintGeo = new THREE.SphereGeometry(0.06, 8, 8);
+  const glintMat = new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0x444444 });
+  const glintL = new THREE.Mesh(glintGeo, glintMat);
+  glintL.position.set(-0.35, 0.4, 1.1);
+  pandaGroup.add(glintL);
+  const glintR = glintL.clone();
+  glintR.position.set(0.55, 0.4, 1.1);
+  pandaGroup.add(glintR);
+
+  // Нос (розовый)
+  const noseGeo = new THREE.ConeGeometry(0.15, 0.2, 8);
+  const noseMat = new THREE.MeshPhongMaterial({ color: 0xff88aa });
+  const nose = new THREE.Mesh(noseGeo, noseMat);
+  nose.position.set(0, -0.1, 1.1);
+  nose.rotation.x = 0.3;
+  pandaGroup.add(nose);
+
+  // Челюсть (для анимации рта)
+  jaw = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.2, 0.4), new THREE.MeshPhongMaterial({ color: 0xffffff }));
+  jaw.position.set(0, -0.4, 1.0);
+  jaw.castShadow = true;
+  pandaGroup.add(jaw);
+
+  // Пятна под глазами (опционально)
+  const spotGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 16);
+  const spotMat = new THREE.MeshPhongMaterial({ color: 0xcccccc });
+  const spotL = new THREE.Mesh(spotGeo, spotMat);
+  spotL.position.set(-0.45, 0.15, 0.95);
+  spotL.rotation.x = Math.PI/2;
+  pandaGroup.add(spotL);
+  const spotR = spotL.clone();
+  spotR.position.set(0.45, 0.15, 0.95);
+  pandaGroup.add(spotR);
+
+  pandaGroup.position.y = 0;
+  pandaGroup.scale.set(0.8, 0.8, 0.8);
+}
+
+// ---- Загрузка комнат ----
+function loadRoom(room) {
+  currentRoom = room;
+
+  // Удаляем всё, кроме панды и источников света (их мы пересоздадим)
+  while(scene.children.length > 0) {
+    scene.remove(scene.children[0]);
+  }
+  scene.add(pandaGroup);
+
+  // Добавляем свет
+  scene.add(lightsGroup.clone()); // клонируем, чтобы не потерять оригинал
+
+  if (room === 'main') {
+    // Пол
+    const floorMat = new THREE.MeshPhongMaterial({ color: 0x0a1420, emissive: 0x050810 });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -1;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // Несколько декоративных элементов
+    const flowerMat = new THREE.MeshPhongMaterial({ color: 0xff69b4, emissive: 0x220011 });
+    const flower = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16), flowerMat);
+    flower.position.set(2, -0.8, -2);
+    scene.add(flower);
+
+    const starMat = new THREE.MeshPhongMaterial({ color: 0xffdd44, emissive: 0x442200 });
+    const star = new THREE.Mesh(new THREE.DodecahedronGeometry(0.15), starMat);
+    star.position.set(-2, -0.8, -2);
+    scene.add(star);
+  } else if (room === 'bedroom') {
+    // Пол спальни (темнее)
+    const floorMat = new THREE.MeshPhongMaterial({ color: 0x1a0f2a });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -1;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // Кровать (простой куб)
+    const bedMat = new THREE.MeshPhongMaterial({ color: 0x4a148c });
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(3, 0.5, 2), bedMat);
+    bed.position.set(0, -0.5, -3);
+    bed.castShadow = true;
+    bed.receiveShadow = true;
+    scene.add(bed);
+
+    // Луна (источник света)
+    const moonLight = new THREE.PointLight(0xffffaa, 0.8, 10);
+    moonLight.position.set(2, 3, -4);
+    scene.add(moonLight);
+    const moonMat = new THREE.MeshPhongMaterial({ color: 0xffffaa, emissive: 0x332200 });
+    const moon = new THREE.Mesh(new THREE.SphereGeometry(0.5, 24), moonMat);
+    moon.position.copy(moonLight.position);
+    moon.castShadow = true;
+    scene.add(moon);
+  }
+}
+
+// ---- Эмоции ----
+function setEmotion(newEm) {
+  emotion = newEm;
+  // Меняем цвет глаз в зависимости от эмоции
+  let color;
+  switch (newEm) {
+    case 'happy': color = 0x00e8ff; break; // голубой
+    case 'excited': color = 0xff3fa4; break; // розовый
+    case 'thinking': color = 0x4488ff; break; // синий
+    case 'love': color = 0xff69b4; break; // ярко-розовый
+    case 'surprised': color = 0xffff00; break; // жёлтый
+    case 'angry': color = 0xff0000; break; // красный
+    default: color = 0x000000;
+  }
+  eyeL.material.color.setHex(color);
+  eyeR.material.color.setHex(color);
+
+  // Спавним частицы под определённые эмоции
+  if (newEm === 'happy' || newEm === 'love') spawnHearts();
+  else if (newEm === 'thinking') spawnQuestion();
+  else if (newEm === 'surprised') spawnLightning();
+}
+
+function spawnHearts() {
+  for (let i=0; i<5; i++) {
+    const heart = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6), new THREE.MeshBasicMaterial({color: 0xff69b4}));
+    heart.position.set(
+      (Math.random()-0.5)*1.5,
+      Math.random()*2 + 0.5,
+      (Math.random()-0.5)*1.5
+    );
+    scene.add(heart);
+    setTimeout(() => scene.remove(heart), 1500);
+  }
+}
+
+function spawnLightning() {
+  const boltMat = new THREE.MeshBasicMaterial({color: 0xffff00});
+  const bolt = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.5, 8), boltMat);
+  bolt.position.set(0, 1.5, 0.5);
+  bolt.rotation.z = 0.3;
+  scene.add(bolt);
+  setTimeout(() => scene.remove(bolt), 800);
+}
+
+function spawnQuestion() {
+  // Загружаем стандартный шрифт three.js
+  const loader = new THREE.FontLoader();
+  loader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', function(font) {
+    const geometry = new THREE.TextGeometry('?', {
+      font: font,
+      size: 0.5,
+      height: 0.1
+    });
+    const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const question = new THREE.Mesh(geometry, material);
+    question.position.set(0, 2.0, 0.5);
+    question.rotation.x = 0.2;
+    scene.add(question);
+    setTimeout(() => scene.remove(question), 1500);
+  });
+}
+
+function openMouth() {
+  jaw.scale.y = 1.3; // имитация открытия
+  jaw.position.y = -0.45;
+}
+
+function closeMouth() {
+  jaw.scale.y = 1.0;
+  jaw.position.y = -0.4;
+}
+
+// ---- Работа с сервером и голосом ----
+async function ask(text) {
+  const btn = document.getElementById('sendBtn');
+  const chatDiv = document.getElementById('chatText');
+  btn.textContent = '⏳'; btn.disabled = true;
+
+  setEmotion('thinking');
+  triggerNeonPulse();
+  chatDiv.innerHTML = 'Думаю...';
+
+  try {
+    // Сохраняем историю
+    chatHistory.push({ role: 'user', content: text });
+
+    const response = await fetch(SERVER + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, history: chatHistory })
+    });
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const data = await response.json();
+
+    chatDiv.textContent = data.text;
+    setEmotion(data.emotion || 'happy');
+    triggerNeonPulse();
+
+    // Сохраняем ответ в историю и в localStorage
+    chatHistory.push({ role: 'assistant', content: data.text });
+    localStorage.setItem('pandaHistory', JSON.stringify(chatHistory.slice(-10)));
+
+    // Озвучка, если включена (можно добавить проверку)
+    speakText(data.text);
+
+  } catch (err) {
+    console.error(err);
+    chatDiv.textContent = 'Сервер спит... Подожди 30 сек 😴';
+    setEmotion('sleepy');
+  } finally {
+    btn.textContent = '➤'; btn.disabled = false;
+  }
+}
+
+// Функция отправки сообщения (из поля ввода)
+function send() {
+  const input = document.getElementById('messageInput');
+  const text = input.value.trim();
+  if (text) {
+    ask(text);
+    input.value = '';
+  }
+}
+
+// Функция для быстрых вопросов (например, кнопки)
+function sq(q) {
+  ask(q);
+}
+
+// Озвучка через ElevenLabs (замените API ключ и Voice ID)
+async function speakText(text) {
+  // Инициализация AudioContext по клику (для автозапуска)
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // нужно будет запустить по пользовательскому жесту, но в этой функции он уже будет
+  }
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+  const apiKey = 'ТВОЙ_ELEVENLABS_KEY'; // Вставьте свой ключ
+  const voiceId = 'EXAVITQu4vr4xnSDxMaL'; // Например, Bella
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id: 'eleven_monolingual_v1',
+        voice_settings: { stability: 0.5, similarity_boost: 0.5 }
+      })
+    });
+
+    if (!response.ok) throw new Error('ElevenLabs error');
+
+    const audioBlob = await response.blob();
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+    audio.play();
+
+    openMouth();
+    audio.onended = () => closeMouth();
+
+  } catch (e) {
+    console.warn('TTS не работает, используем стандартный синтез');
+    // fallback на Web Speech API
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'ru-RU';
+    utterance.onstart = openMouth;
+    utterance.onend = closeMouth;
+    speechSynthesis.speak(utterance);
+  }
+}
+
+// ---- Скины ----
+function toggleSkinPanel() {
+  const panel = document.getElementById('skinPanel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+function changeSkin(skin) {
+  console.log('Скин изменён на', skin);
+  // Здесь можно менять материалы панды
+  toggleSkinPanel(); // скрыть панель после выбора
+}
+
+// ---- Эффекты ----
+function triggerNeonPulse() {
+  // анимация свечения вокруг панды (можно через CSS или Three.js)
+  // заглушка
+}
+
+// ---- Обработчики событий ----
+document.getElementById('sendBtn').addEventListener('click', send);
+document.getElementById('messageInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') send();
+});
+
+// При загрузке страницы восстановим последний диалог (опционально)
+window.addEventListener('load', () => {
+  init();
+  // Показываем приветствие из истории, если есть
+  if (chatHistory.length > 0) {
+    const lastAssistant = chatHistory.filter(m => m.role === 'assistant').pop();
+    if (lastAssistant) document.getElementById('chatText').textContent = lastAssistant.content;
+  }
+});
+
+// Анимационный цикл
+function animate() {
+  requestAnimationFrame(animate);
+  // Вращение панды (медленное)
+  pandaGroup.rotation.y += 0.002;
+  // Плавное движение камеры, если нужно
+  if (orbitControls) orbitControls.update();
+  renderer.render(scene, camera);
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+</script>
+</body>
+</html>
